@@ -2,7 +2,9 @@
 #include <math.h>
 #define PI 3.141592
 
-NodeWallFollowing::NodeWallFollowing(ros::Publisher pub, ros::ServiceClient srv_client, object_marker::Objects objs, double wallDist, double maxSp, int dir, double pr, double di, double an)
+int case3counter = 200;
+
+NodeWallFollowing::NodeWallFollowing(ros::Publisher pub, ros::ServiceClient srv_client, object_marker::Objects objs, double wallDist, double maxSp, int dir, double pr, double di, double an):ac("move_base",true)
 {
 	wallDistance = wallDist;
 	maxSpeed = maxSp;
@@ -18,6 +20,7 @@ NodeWallFollowing::NodeWallFollowing(ros::Publisher pub, ros::ServiceClient srv_
 	object_marker_client = srv_client;
 	follow_mode = 0;
 	objects = objs;
+	case3aj = false;
 }
 
 NodeWallFollowing::~NodeWallFollowing()
@@ -33,11 +36,11 @@ void NodeWallFollowing::publishMessage()
 	int minIndex;
 	int maxIndex;
 
-	int case3counter;
+	
 
 	if (follow_mode == 3 || follow_mode == 4)
 	{
-		if ((direction == 1 && distLeft > 1.5 * wallDistance) || (direction == -1 && distRight > 1.5 * wallDistance)) //distFront > wallDistance &&
+		if (((direction == 1 && distLeft > 1.5 * wallDistance) || (direction == -1 && distRight > 1.5 * wallDistance)) && case3aj == false) //distFront > wallDistance &&
 			follow_mode = 4;
 		else
 			follow_mode = 3;
@@ -50,7 +53,14 @@ void NodeWallFollowing::publishMessage()
 			follow_mode = 1;
 		if ((distFront < wallDistance || distLeft < wallDistance || distRight < wallDistance) && follow_mode != 2)
 		{
-			if (distLeft < distRight)
+			if (distFront < wallDistance)
+			{
+				if (distFront_left < distFront_right)
+				{
+					direction = 1;
+				}
+			}
+			else if (distLeft < distRight)
 			{
 				direction = 1;
 			}
@@ -117,21 +127,26 @@ void NodeWallFollowing::publishMessage()
 
 		std::cout << "case3counter" << case3counter << std::endl;
 
-		if (case3counter == 5)
+		if (case3counter > 500 && ((distRight>0.2 && distLeft>0.15 && direction == 1) || (distRight>0.15 && distLeft>0.2 && direction == -1))) 
 		{
-
+			
 			ROS_INFO("ready to detect");
-			ninetyDegreeTurn(0.5 * direction, 0);
+			if (case3aj == false)
+				ninetyDegreeTurn(0.5 * direction, 0);
+
 			// adjust orientation to face the object
-			last_e_laserIndex = e_laserIndex;
-			while (abs(e_laserIndex) > 10)
+			int last_e_laserIndex = e_laserIndex;
+			if (abs(e_laserIndex) > 10)
 			{
-				diff_e_laser = e_laserIndex - last_e_laserIndex;
+				ROS_INFO("ttt");
+				case3aj = true;
+				int diff_e_laser = e_laserIndex - last_e_laserIndex;
 				last_e_laserIndex = e_laserIndex;
-				vel_msg.angular.z = 0.001 * (P * last_e_laserIndex + D * diff_e_laser); //PD controller
-				pubMessage.publish(vel_msg);
-				ros::spinOnce();
-			}
+				msg.angular.z = 0.001 * (P * last_e_laserIndex + D * diff_e_laser); //PD controller
+				// pubMessage.publish(msg);
+				// ros::spinOnce();
+			}else{
+				case3aj = false;
 
 			// move backward 0.1 m
 			while (!ac.waitForServer(ros::Duration(5.0)))
@@ -140,10 +155,11 @@ void NodeWallFollowing::publishMessage()
 			}
 			goal.target_pose.header.frame_id = "base_link";
 			goal.target_pose.header.stamp = ros::Time::now();
-			goal.target_pose.pose.position.x = -0.1;
+			goal.target_pose.pose.position.x = -0.2;
 			goal.target_pose.pose.orientation.w = 1.0; // need to update
-			ac.sendGoal(temp_goal);
+			ac.sendGoal(goal);
 			ac.waitForResult();
+			ros::Duration(3).sleep();
 			if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
 			{
 				ROS_INFO("Start Detecting");
@@ -154,7 +170,8 @@ void NodeWallFollowing::publishMessage()
 					{
 						ROS_INFO("Call Service Successfully");
 						int new_count = srv.response.updated_objects.objects.size() - srv.request.old_objects.objects.size();
-						ROS_INFO("New detected %d objects, now have %d", new_count, srv.response.updated_objects.objects.size());
+						int total_count = srv.response.updated_objects.objects.size();
+						ROS_INFO("New detected %d objects, now have %d", new_count, total_count);
 						objects = srv.response.updated_objects;
 					}
 					else 
@@ -167,8 +184,9 @@ void NodeWallFollowing::publishMessage()
 				}
 			}
 			else
-				ROS_INFO("The base failed to move backward 0.1 meter for some reason");
+				ROS_INFO("The base failed to move for some reason");
 
+			ninetyDegreeTurn(-0.5 * direction, 0);
 			//publish
 			// srv.request.old_objects = objects;
 
@@ -187,14 +205,19 @@ void NodeWallFollowing::publishMessage()
 			// 	msg.linear.x = 0;
 			// 	msg.angular.z = 0;
 			// }
+			case3counter = 0;
+			ROS_INFO("set counter to 0");
+			}
 		}
+		
 		isturn = false;
+		ROS_INFO("break 3");
 		break;
 	case 4:
 		size = laser_msg.ranges.size();
 		minIndex = round((double)size * (double)(direction + 1) / 4.0 + 3.0 * (double)(1 + direction) * size / 16.0);
 		maxIndex = round((double)size * (double)(direction + 3) / 4.0 - 3.0 * (double)(1 - direction) * size / 16.0);
-		ROS_INFO("%d, %d,%d", size, minIndex, maxIndex);
+		//ROS_INFO("%d, %d,%d", size, minIndex, maxIndex);
 		for (int i = minIndex; i < maxIndex; i++)
 		{
 			if (laser_msg.ranges[i] < laser_msg.ranges[minIndex] && laser_msg.ranges[i] > 0.0)
@@ -202,7 +225,7 @@ void NodeWallFollowing::publishMessage()
 				minIndex = i;
 			}
 		}
-		ROS_INFO("minimum_id: %d, minimum_distance: %f", minIndex, laser_msg.ranges[minIndex]);
+		//ROS_INFO("minimum_id: %d, minimum_distance: %f", minIndex, laser_msg.ranges[minIndex]);
 		if (laser_msg.ranges[minIndex] < 1.5 * wallDistance) // there's still wall
 			msg.linear.x = 0.5 * maxSpeed;					 // more control might be needed
 		else
@@ -216,7 +239,7 @@ void NodeWallFollowing::publishMessage()
 				pubMessage.publish(msg);
 				ros::Duration(0.01).sleep();
 				current_time = ros::Time::now().toSec();
-				ROS_INFO("%f,%f", start_time, current_time);
+				//ROS_INFO("%f,%f", start_time, current_time);
 			}
 			isturn = true;
 		}
@@ -229,6 +252,7 @@ void NodeWallFollowing::publishMessage()
 	//if(current_cmd.linear.x!=msg.linear.x || current_cmd.angular.z != msg.angular.z){
 	pubMessage.publish(msg);
 	current_cmd = msg;
+	ROS_INFO("finish call back");
 	// }
 }
 
@@ -237,20 +261,21 @@ void NodeWallFollowing::ninetyDegreeTurn(double yaw_speed, double x_speed)
 	double start_time = ros::Time::now().toSec();
 	double current_time = start_time;
 	geometry_msgs::Twist msg;
-	while (current_time - start_time < 3.3 && isturn == false)
+	while (current_time - start_time < 3 && isturn == false)
 	{
 		msg.angular.z = yaw_speed;
 		msg.linear.x = x_speed;
 		pubMessage.publish(msg);
 		ros::Duration(0.01).sleep();
 		current_time = ros::Time::now().toSec();
-		ROS_INFO("%f,%f", start_time, current_time);
+		//ROS_INFO("%f,%f", start_time, current_time);
 	}
 }
 
 //Subscriber
 void NodeWallFollowing::messageCallback(const sensor_msgs::LaserScan::ConstPtr &msg)
 {
+	ROS_INFO("new laser mesge");
 	if (isDetectionObject == false)
 	{
 		laser_msg = *msg;
@@ -279,6 +304,12 @@ void NodeWallFollowing::messageCallback(const sensor_msgs::LaserScan::ConstPtr &
 		double distMin;
 		distMin = laser_msg.ranges[minIndex];
 		distFront = laser_msg.ranges[size / 2];
+		for (int i = 1; i < 10; i++){
+			distFront_left = distFront_left + laser_msg.ranges[size/2 + i];
+			distFront_right = 	distFront_right + laser_msg.ranges[size/2 - i];
+		}
+		distFront_left = distFront_left / 9;
+		distFront_right = distFront_right / 9;	
 		distLeft = laser_msg.ranges[size - 1];
 		distRight = laser_msg.ranges[0];
 		// if (distFront < 0.02)
@@ -292,7 +323,9 @@ void NodeWallFollowing::messageCallback(const sensor_msgs::LaserScan::ConstPtr &
 		e_laserIndex = minIndex - mid_laser_index;
 
 		//Invoking method for publishing message
+		ROS_INFO("pub message");
 		publishMessage();
+		ROS_INFO("finish pub");
 	}
 }
 

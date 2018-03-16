@@ -2,10 +2,12 @@
 #include "sensor_msgs/LaserScan.h"
 #include "geometry_msgs/Twist.h"
 #include "std_msgs/Bool.h"
-#include "object_marker/Objects.h>"
-#include "object_marker/MarkObject.h>"
+#include "object_marker/Objects.h"
+#include "object_marker/MarkObject.h"
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
+
+typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
 class NodeWallFollowing
 {
@@ -20,7 +22,7 @@ public:
    * di    D constant for PD controller.
    * an    Angle coefficient for P controller.
    */
-  NodeWallFollowing(ros::Publisher pub, ros::Publisher pub_new, double wallDist, double maxSp, int dir, double pr, double di, double an);
+  NodeWallFollowing(ros::Publisher pub, ros::ServiceClient srv_client, object_marker::Objects objs, double wallDist, double maxSp, int dir, double pr, double di, double an);
 
   ~NodeWallFollowing();
 
@@ -58,6 +60,7 @@ public:
   double distFront;    // Distance, measured by ranger in front of robot.
   double distLeft;     // Distance, measured by ranger in left of robot.
   double distRight;    // Distance, measured by ranger in right of robot.
+  double distFront_left, distFront_right;
   int follow_mode;     // follow_mode in publishMessage
   ros::Publisher pubMessage;  // Object for publishing messages.
   geometry_msgs::Twist current_cmd; //Current cmd
@@ -66,6 +69,7 @@ public:
   object_marker::Objects objects; // detected objects
   object_marker::MarkObject srv; // mark object service
   ros::ServiceClient object_marker_client; // service client to call object marking
-  MoveBaseClient ac("move_base",true); // action client 
+  MoveBaseClient ac; // action client 
   move_base_msgs::MoveBaseGoal goal; // goal to go
+  bool case3aj;
 };
